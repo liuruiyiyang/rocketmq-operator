@@ -85,7 +85,7 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
 	reqLogger.Info("Reconciling Broker.")
 
-	// Fetch the Broker instance
+	// Fetch the Broker cluster instance
 	broker := &cachev1alpha1.Broker{}
 	err := r.client.Get(context.TODO(), request.NamespacedName, broker)
 	if err != nil {
@@ -98,6 +98,13 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 		}
 		// Error reading the object - requeue the request.
 		reqLogger.Error(err, "Failed to get Broker.")
+		return reconcile.Result{}, err
+	}
+
+	log.Info("Reconciling Influxdb Persistent Volume Claim")
+	// Reconcile the cluster service
+	err = r.reconcilePVC(broker)
+	if err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -161,6 +168,65 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 	return reconcile.Result{}, nil
 }
 
+
+
+// newPVCs creates the PVCs used by the application.
+func newPVCs(cr *cachev1alpha1.Broker) *corev1.PersistentVolumeClaim {
+	ls := labelsForBroker(cr.Name)
+
+	return &corev1.PersistentVolumeClaim{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "PersistentVolumeClaim",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cr.Spec.Pod.PersistentVolumeClaim.Name,
+			Namespace: cr.Namespace,
+			Labels:    ls,
+		},
+		Spec: cr.Spec.Pod.PersistentVolumeClaim.Spec,
+	}
+}
+
+// reconcilePVC ensures the Persistent Volume Claim is created.
+func (r *ReconcileBroker) reconcilePVC(cr *cachev1alpha1.Broker) error {
+	// Check if this Persitent Volume Claim already exists
+	found := &corev1.PersistentVolumeClaim{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: cr.Spec.Pod.PersistentVolumeClaim.Name, Namespace: cr.Namespace}, found)
+	if err != nil && errors.IsNotFound(err) {
+		log.Info("Creating a new Persistent Volume Claim", "cr.Namespace", cr.Namespace, "cr.Spec.Pod.PersistentVolumeClaim.Name", cr.Spec.Pod.PersistentVolumeClaim.Name)
+		pvc := newPVCs(cr)
+
+		// Set Broker instance as the owner and controller
+		if err = controllerutil.SetControllerReference(cr, pvc, r.scheme); err != nil {
+			log.Error(err, "error occurs when set Broker instance as the owner and controller in reconcilePVC")
+			return err
+		}
+
+		err = r.client.Create(context.TODO(), pvc)
+		if err != nil {
+			log.Error(err, "error")
+			return err
+		}
+
+		// Persitent Volume Claim created successfully
+		cr.Status.PersistentVolumeClaimName = pvc.Name
+		err = r.client.Update(context.TODO(), cr)
+		if err != nil {
+			log.Error(err, "error")
+			return err
+		}
+
+		return nil
+	} else if err != nil {
+		log.Error(err, "error")
+		return err
+	}
+
+	log.Info("Skip reconcile: Persistent Volume Claim already exists", "found.Namespace", found.Namespace, "found.Name", found.Name)
+	return nil
+}
+
 // deploymentForBroker returns a broker Deployment object
 func (r *ReconcileBroker) deploymentForBroker(m *cachev1alpha1.Broker) *appsv1.Deployment {
 	ls := labelsForBroker(m.Name)
@@ -182,8 +248,29 @@ func (r *ReconcileBroker) deploymentForBroker(m *cachev1alpha1.Broker) *appsv1.D
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Image:   "2019liurui/rocketmq-broker:4.5.0-alpine",
+						Image:   m.Spec.BrokerImage,
 						Name:    "broker",
+						ImagePullPolicy: m.Spec.ImagePullPolicy,
+						Resources:       newContainerResources(m),
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      "broker-logs",
+								SubPath:   "broker.logs",
+								MountPath: "/home/rocketmq/logs",
+							},
+							{
+								Name:      "broker-store",
+								SubPath:   "broker.store",
+								MountPath: "/home/rocketmq/store",
+							},
+						},
+						Env: []corev1.EnvVar{{
+							Name: "NAMESRV_ADDRESS",
+							Value: m.Spec.NameServers,
+						},{
+							Name: "REPLICATION_MODE",
+							Value: m.Spec.ReplicationMode,
+						}},
 						//Command: []string{"memcached", "-m=64", "-o", "modern", "-v"},
 						Ports: []corev1.ContainerPort{{
 							ContainerPort: 10909,
@@ -196,6 +283,24 @@ func (r *ReconcileBroker) deploymentForBroker(m *cachev1alpha1.Broker) *appsv1.D
 							Name:          "10912port",
 						}},
 					}},
+					Volumes: []corev1.Volume{
+						{
+							Name: "broker-logs",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: m.Spec.Pod.PersistentVolumeClaim.Name,
+								},
+							},
+						},
+						{
+							Name: "broker-store",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: m.Spec.Pod.PersistentVolumeClaim.Name,
+								},
+							},
+						},
+					},
 				},
 			},
 		},
@@ -203,6 +308,15 @@ func (r *ReconcileBroker) deploymentForBroker(m *cachev1alpha1.Broker) *appsv1.D
 	// Set Broker instance as the owner and controller
 	controllerutil.SetControllerReference(m, dep, r.scheme)
 	return dep
+}
+
+// newContainerResources will create the container Resources for the InfluxDB Pod.
+func newContainerResources(m *cachev1alpha1.Broker) corev1.ResourceRequirements {
+	resources := corev1.ResourceRequirements{}
+	if m.Spec.Pod != nil {
+		resources = m.Spec.Pod.Resources
+	}
+	return resources
 }
 
 // labelsForBroker returns the labels for selecting the resources

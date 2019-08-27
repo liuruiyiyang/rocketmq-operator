@@ -16,4 +16,5 @@
 # limitations under the License.
 
 ./brokerGenConfig.sh
+echo "NAMESRV_ADDRESS is $NAMESRV_ADDRESS"
 ./mqbroker -n $NAMESRV_ADDRESS

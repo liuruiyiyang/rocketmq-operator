@@ -79,11 +79,11 @@ RUN sed -i 's/${JAVA_HOME}\/jre\/lib\/ext/${JAVA_HOME}\/jre\/lib\/ext:${JAVA_HOM
 
 COPY brokerGenConfig.sh brokerStart.sh ${ROCKETMQ_HOME}/bin/
 
-RUN chmod +x ${ROCKETMQ_HOME}/bin/brokerGenConfig.sh \
- && chmod +x ${ROCKETMQ_HOME}/bin/brokerStart.sh
+RUN chmod a+x ${ROCKETMQ_HOME}/bin/brokerGenConfig.sh \
+ && chmod a+x ${ROCKETMQ_HOME}/bin/brokerStart.sh
 
 USER ${user}
 
 WORKDIR ${ROCKETMQ_HOME}/bin
 
-CMD ["/bin/bash", "mqbroker"]
+CMD ["/bin/bash", "./brokerStart.sh"]

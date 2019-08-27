@@ -10,8 +10,6 @@ spec:
     plural: brokers
     singular: broker
   scope: Namespaced
-  subresources:
-    status: {}
   validation:
     openAPIV3Schema:
       properties:
@@ -29,11 +27,46 @@ spec:
           type: object
         spec:
           properties:
+            brokerImage:
+              description: BrokerImage is the RocketMQ broker container image to use
+                for the Pods.
+              type: string
+            imagePullPolicy:
+              description: ImagePullPolicy defines how the image is pulled.
+              type: string
+            nameServers:
+              description: NameServers defines the name service list e.g. 192.168.1.1:9876;192.168.1.2:9876
+              type: string
+            pod:
+              description: Pod defines the policy for pods owned by RocketMQ operator.
+                This field cannot be updated once the CR is created.
+              properties:
+                persistentVolumeClaim:
+                  description: PersistentVolumeClaim is the claim to describe PVC
+                    for the RockerMQ container
+                  type: object
+                resources:
+                  description: Resources is the resource requirements for the containers.
+                  type: object
+              type: object
+            replicationMode:
+              description: ReplicationMode defines the replication is sync or async
+                e.g. SYNC
+              type: string
             size:
+              description: 'Size is the number of the RocketMQ broker cluster. Default:
+                1'
               format: int32
+              type: integer
+            slavePerGroup:
+              description: SlavePerGroup defines how many slave brokers each broker
+                group has
+              format: int64
               type: integer
           required:
           - size
+          - brokerImage
+          - imagePullPolicy
           type: object
         status:
           properties:
@@ -41,8 +74,13 @@ spec:
               items:
                 type: string
               type: array
+            persistentVolumeClaimName:
+              description: PersistentVolumeClaimName is the name of the PVC backing
+                the pods in the cluster.
+              type: string
           required:
           - nodes
+          - persistentVolumeClaimName
           type: object
   version: v1alpha1
   versions:
