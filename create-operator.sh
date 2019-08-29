@@ -20,7 +20,7 @@ set -eux;
 DOCKERHUB_REPO="2019liurui/rocketmq-operator:v0.0.1-snapshot"
 
 operator-sdk generate k8s
-operator-sdk generate openapi
+# operator-sdk generate openapi
 
 export GO111MODULE=on
 go mod vendor
