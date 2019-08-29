@@ -101,7 +101,7 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 		return reconcile.Result{}, err
 	}
 
-	log.Info("Reconciling Influxdb Persistent Volume Claim")
+	log.Info("Reconciling Broker Persistent Volume Claim")
 	// Reconcile the cluster service
 	err = r.reconcilePVC(broker)
 	if err != nil {
@@ -310,7 +310,7 @@ func (r *ReconcileBroker) deploymentForBroker(m *cachev1alpha1.Broker) *appsv1.D
 	return dep
 }
 
-// newContainerResources will create the container Resources for the InfluxDB Pod.
+// newContainerResources will create the container Resources for the Broker Pod.
 func newContainerResources(m *cachev1alpha1.Broker) corev1.ResourceRequirements {
 	resources := corev1.ResourceRequirements{}
 	if m.Spec.Pod != nil {
