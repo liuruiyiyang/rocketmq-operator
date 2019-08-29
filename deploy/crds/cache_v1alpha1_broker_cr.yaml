@@ -5,3 +5,5 @@ metadata:
 spec:
   # Add fields here
   size: 1
+  # Modify this field with the real namesrv list
+  nameServers: 192.168.130.33:9876;192.168.130.34:9876
