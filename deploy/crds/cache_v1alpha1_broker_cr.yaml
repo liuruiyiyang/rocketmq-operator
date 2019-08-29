@@ -15,6 +15,7 @@ kind: ConfigMap
 metadata:
   name: broker-config
 data:
-  deleteWhen: 04
-  fileReservedTime: 48
-  flushDiskType: ASYNC_FLUSH
+  broker-config.yml: |
+    deleteWhen: 04
+    fileReservedTime: 48
+    flushDiskType: ASYNC_FLUSH
