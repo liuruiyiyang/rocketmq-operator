@@ -7,3 +7,14 @@ spec:
   size: 1
   # Modify this field with the real namesrv list
   nameServers: 192.168.130.33:9876;192.168.130.34:9876
+  # replicationMode is ASYNC or SYNC
+  replicationMode: "ASYNC"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: broker-config
+data:
+  deleteWhen: 04
+  fileReservedTime: 48
+  flushDiskType: ASYNC_FLUSH

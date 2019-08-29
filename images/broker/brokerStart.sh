@@ -15,5 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+ROCKETMQ_VERSION=4.5.0
+BROKER_CONFIG_FILE="/home/rocketmq/rocketmq-$ROCKETMQ_VERSION/conf/broker.conf"
+
 ./brokerGenConfig.sh
-./mqbroker -n $NAMESRV_ADDRESS
+./mqbroker -n $NAMESRV_ADDR -c $BROKER_CONFIG_FILE

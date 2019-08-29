@@ -79,6 +79,13 @@ func schema_pkg_apis_cache_v1alpha1_BrokerSpec(ref common.ReferenceCallback) com
 							Format:      "",
 						},
 					},
+					"replicationMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReplicationMode defines the replication is sync or async e.g. SYNC",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"size"},
 			},

@@ -185,8 +185,47 @@ func (r *ReconcileBroker) deploymentForBroker(m *cachev1alpha1.Broker) *appsv1.D
 						Image:   "2019liurui/rocketmq-broker:4.5.0-alpine",
 						Name:    "broker",
 						Env: []corev1.EnvVar{{
-							Name: "NAMESRV_ADDRESS",
+							Name: "NAMESRV_ADDR",
 							Value: m.Spec.NameServers,
+						},{
+							Name: "IS_BROKER_MASTER",
+							Value: "TRUE",
+						},{
+							Name: "REPLICATION_MODE",
+							Value: m.Spec.ReplicationMode,
+						},{
+							Name: "BROKER_ID",
+							Value: "0",
+						},{
+							Name: "DELETE_WHEN",
+							ValueFrom: &corev1.EnvVarSource{
+								ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "broker-config",
+									},
+									Key: "deleteWhen",
+								},
+							},
+						},{
+							Name: "FILE_RESERVED_TIME",
+							ValueFrom: &corev1.EnvVarSource{
+								ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "broker-config",
+									},
+									Key: "fileReservedTime",
+								},
+							},
+						},{
+							Name: "FLUSH_DISK_TYPE",
+							ValueFrom: &corev1.EnvVarSource{
+								ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "broker-config",
+									},
+									Key: "flushDiskType",
+								},
+							},
 						}},
 						//Command: []string{"memcached", "-m=64", "-o", "modern", "-v"},
 						Ports: []corev1.ContainerPort{{
