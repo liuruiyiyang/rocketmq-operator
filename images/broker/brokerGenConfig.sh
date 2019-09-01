@@ -15,8 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ROCKETMQ_VERSION=4.5.0
-BROKER_CONFIG_FILE="/home/rocketmq/rocketmq-$ROCKETMQ_VERSION/conf/broker.conf"
+BROKER_CONFIG_FILE="$ROCKETMQ_HOME/conf/broker.conf"
 echo $BROKER_CONFIG_FILE
 
 BROKER_NAME=broker-$(cat /etc/hostname | grep -o '[^-]*$')

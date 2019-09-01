@@ -165,7 +165,8 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 func (r *ReconcileBroker) deploymentForBroker(m *cachev1alpha1.Broker) *appsv1.Deployment {
 	ls := labelsForBroker(m.Name)
 	replicas := m.Spec.Size
-
+	reqLogger := log.WithValues("NameServers", m.Spec.NameServers, "ReplicationMode", m.Spec.ReplicationMode)
+	reqLogger.Info("Running deploymentForBroker() ...")
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,

@@ -11,9 +11,9 @@ import (
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
-		"github.com/operator-framework/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1.Broker":       schema_pkg_apis_cache_v1alpha1_Broker(ref),
-		"github.com/operator-framework/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerSpec":   schema_pkg_apis_cache_v1alpha1_BrokerSpec(ref),
-		"github.com/operator-framework/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerStatus": schema_pkg_apis_cache_v1alpha1_BrokerStatus(ref),
+		"github.com/alpha/rocketmq-operator/pkg/apis/cache/v1alpha1.Broker":       schema_pkg_apis_cache_v1alpha1_Broker(ref),
+		"github.com/alpha/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerSpec":   schema_pkg_apis_cache_v1alpha1_BrokerSpec(ref),
+		"github.com/alpha/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerStatus": schema_pkg_apis_cache_v1alpha1_BrokerStatus(ref),
 	}
 }
 
@@ -44,19 +44,19 @@ func schema_pkg_apis_cache_v1alpha1_Broker(ref common.ReferenceCallback) common.
 					},
 					"spec": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("github.com/operator-framework/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerSpec"),
+							Ref: ref("github.com/alpha/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerSpec"),
 						},
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("github.com/operator-framework/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerStatus"),
+							Ref: ref("github.com/alpha/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerStatus"),
 						},
 					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/operator-framework/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerSpec", "github.com/operator-framework/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
+			"github.com/alpha/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerSpec", "github.com/alpha/rocketmq-operator/pkg/apis/cache/v1alpha1.BrokerStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
 	}
 }
 
@@ -81,7 +81,7 @@ func schema_pkg_apis_cache_v1alpha1_BrokerSpec(ref common.ReferenceCallback) com
 					},
 					"replicationMode": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ReplicationMode defines the replication is sync or async e.g. SYNC",
+							Description: "ReplicationMode defines the replication is SYNC or ASYNC",
 							Type:        []string{"string"},
 							Format:      "",
 						},
