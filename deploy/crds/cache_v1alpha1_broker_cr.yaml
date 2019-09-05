@@ -33,9 +33,12 @@ spec:
   # volumeClaimTemplates defines the data storage
   persistentVolumeClaim:
     metadata:
-      name: "broker-storage"
+      name: broker-storage
     spec:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
           storage: 8Gi
+  persistentVolumeReclaimPolicy: Retain
+  nfcServer: 192.168.130.32
+  nfcPath: /data/k8s

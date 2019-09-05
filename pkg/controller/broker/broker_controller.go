@@ -171,7 +171,7 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 				reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + pvcName)
 			}
 
-			slaveDep := r.statefulSetForSlaveBroker(broker, brokerClusterIndex, slaveIndex)
+			slaveDep := r.statefulSetForSlaveBroker(broker, brokerClusterIndex, slaveIndex, pvcName)
 			err = r.client.Get(context.TODO(), types.NamespacedName{Name: slaveDep.Name, Namespace: slaveDep.Namespace}, found)
 			if err != nil && errors.IsNotFound(err) {
 				reqLogger.Info("Creating a new Slave Broker StatefulSet.", "StatefulSet.Namespace", slaveDep.Namespace, "StatefulSet.Name", slaveDep.Name)
@@ -455,21 +455,21 @@ func (r *ReconcileBroker) statefulSetForMasterBroker(m *cachev1alpha1.Broker, br
 						VolumeMounts: []corev1.VolumeMount{{
 							MountPath: cons.LogMountPath,
 							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-logs",
+							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-logs",
 						},{
 							MountPath: cons.StoreMountPath,
 							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store",
+							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store",
 						}},
 					}},
-					Volumes: []corev1.Volume{
-						{
-							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store-volume",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: pvcName,
-								},
+					Volumes: []corev1.Volume{{
+						Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store-volume",
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: pvcName,
 							},
 						},
-					},
+					}},
 				},
 			},
 		},
@@ -482,7 +482,7 @@ func (r *ReconcileBroker) statefulSetForMasterBroker(m *cachev1alpha1.Broker, br
 }
 
 // statefulSetForBroker returns a slave broker StatefulSet object
-func (r *ReconcileBroker) statefulSetForSlaveBroker(m *cachev1alpha1.Broker, brokerClusterIndex int, slaveIndex int) *appsv1.StatefulSet {
+func (r *ReconcileBroker) statefulSetForSlaveBroker(m *cachev1alpha1.Broker, brokerClusterIndex int, slaveIndex int, pvcName string) *appsv1.StatefulSet {
 	ls := labelsForBroker(m.Name)
 	var a int32 = 1
 	var c = &a
@@ -532,32 +532,23 @@ func (r *ReconcileBroker) statefulSetForSlaveBroker(m *cachev1alpha1.Broker, bro
 						VolumeMounts: []corev1.VolumeMount{{
 							MountPath: cons.LogMountPath,
 							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-logs",
+							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-logs",
 						},{
 							MountPath: cons.StoreMountPath,
 							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-store",
+							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-store",
 						}},
 					}},
-					Volumes: []corev1.Volume{
-						{
-							Name: "influxdb-data",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: m.Spec.PersistentVolumeClaim.Name,
-								},
+					Volumes: []corev1.Volume{{
+						Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-store-volume",
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: pvcName,
 							},
 						},
-						{
-							Name: "influxdb-data",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: m.Spec.PersistentVolumeClaim.Name,
-								},
-							},
-						},
-					},
+					}},
 				},
 			},
-
 		},
 	}
 	// Set Broker instance as the owner and controller

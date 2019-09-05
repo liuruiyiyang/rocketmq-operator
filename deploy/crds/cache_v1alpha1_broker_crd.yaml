@@ -36,6 +36,15 @@ spec:
             nameServers:
               description: NameServers defines the name service list e.g. 192.168.1.1:9876;192.168.1.2:9876
               type: string
+            nfcPath:
+              type: string
+            nfcServer:
+              type: string
+            persistentVolumeClaim:
+              description: This field defines the data storage
+              type: object
+            persistentVolumeReclaimPolicy:
+              type: string
             replicationMode:
               description: ReplicationMode is SYNC or ASYNC
               type: string
@@ -46,17 +55,13 @@ spec:
               description: SlavePerGroup each broker cluster's slave number
               format: int64
               type: integer
-            volumeClaimTemplates:
-              description: VolumeClaimTemplates defines the StorageClass
-              items:
-                type: object
-              type: array
           required:
           - size
           - slavePerGroup
           - brokerImage
           - imagePullPolicy
-          - volumeClaimTemplates
+          - nfcServer
+          - nfcPath
           type: object
         status:
           properties:
@@ -64,8 +69,13 @@ spec:
               items:
                 type: string
               type: array
+            persistentVolumeClaimName:
+              description: PersistentVolumeClaimName is the name of the PVC backing
+                the pods in the cluster.
+              type: string
           required:
           - nodes
+          - persistentVolumeClaimName
           type: object
   version: v1alpha1
   versions:
