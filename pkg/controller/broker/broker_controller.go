@@ -19,6 +19,7 @@ package broker
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	cachev1alpha1 "github.com/operator-sdk-samples/rocketmq-operator/pkg/apis/cache/v1alpha1"
 	cons "github.com/operator-sdk-samples/rocketmq-operator/pkg/constants"
@@ -128,31 +129,59 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 
 	for brokerClusterIndex := 0; brokerClusterIndex < share.GroupNum; brokerClusterIndex++ {
 		reqLogger.Info("Check Broker cluster " + strconv.Itoa(brokerClusterIndex+1) + "/" + strconv.Itoa(share.GroupNum))
-		dep := r.statefulSetForMasterBroker(broker, brokerClusterIndex)
-		err = r.client.Get(context.TODO(), types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, found)
+		// prepare pv and pvc for master broker
+		pvName := genPVName(broker, brokerClusterIndex, false, 0)
+		pvcName := genPVCName(broker, brokerClusterIndex, false, 0)
+		pvReconcileError := r.reconcilePV(broker, brokerClusterIndex, false, 0)
+		if pvReconcileError != nil {
+			reqLogger.Error(pvReconcileError, "Failed to reconcile PV " + broker.Namespace + "/" + pvName)
+		}
+		pvcReconcileError := r.reconcilePVC(broker, brokerClusterIndex, false, 0)
+		if pvcReconcileError != nil {
+			reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + pvcName)
+		}
 
+		dep := r.statefulSetForMasterBroker(broker, brokerClusterIndex, pvcName)
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, found)
 		if err != nil && errors.IsNotFound(err) {
 			reqLogger.Info("Creating a new Master Broker StatefulSet.", "StatefulSet.Namespace", dep.Namespace, "StatefulSet.Name", dep.Name)
 			err = r.client.Create(context.TODO(), dep)
-			for slaveIndex := 1; slaveIndex <= slavePerGroup; slaveIndex++ {
-				reqLogger.Info("Check Slave Broker of cluster-" + strconv.Itoa(brokerClusterIndex) + " " + strconv.Itoa(slaveIndex) + "/" + strconv.Itoa(slavePerGroup))
-				slaveDep := r.statefulSetForSlaveBroker(broker, brokerClusterIndex, slaveIndex)
-				err = r.client.Get(context.TODO(), types.NamespacedName{Name: slaveDep.Name, Namespace: slaveDep.Namespace}, found)
-				if err != nil && errors.IsNotFound(err) {
-					reqLogger.Info("Creating a new Slave Broker StatefulSet.", "StatefulSet.Namespace", slaveDep.Namespace, "StatefulSet.Name", slaveDep.Name)
-					err = r.client.Create(context.TODO(), slaveDep)
-					if err != nil {
-						reqLogger.Error(err, "Failed to create new StatefulSet of broker-"+strconv.Itoa(brokerClusterIndex)+"-slave-"+strconv.Itoa(slaveIndex), "StatefulSet.Namespace", slaveDep.Namespace, "StatefulSet.Name", slaveDep.Name)
-					}
-				} else if err != nil {
-					reqLogger.Error(err, "Failed to get broker slave StatefulSet.")
-				}
-			}
+
 			if err != nil {
 				reqLogger.Error(err, "Failed to create new StatefulSet of "+cons.BrokerClusterPrefix+strconv.Itoa(brokerClusterIndex), "StatefulSet.Namespace", dep.Namespace, "StatefulSet.Name", dep.Name)
 			}
 		} else if err != nil {
 			reqLogger.Error(err, "Failed to get broker master StatefulSet.")
+		}
+
+		for slaveIndex := 1; slaveIndex <= slavePerGroup; slaveIndex++ {
+			reqLogger.Info("Check Slave Broker of cluster-" + strconv.Itoa(brokerClusterIndex) + " " + strconv.Itoa(slaveIndex) + "/" + strconv.Itoa(slavePerGroup))
+
+			// prepare pv and pvc for slave broker
+			pvName := genPVName(broker, brokerClusterIndex, true, slaveIndex)
+			pvcName := genPVCName(broker, brokerClusterIndex, true, slaveIndex)
+
+			pvReconcileError := r.reconcilePV(broker, brokerClusterIndex, true, slaveIndex)
+			if pvReconcileError != nil {
+				reqLogger.Error(pvReconcileError, "Failed to reconcile PV " + broker.Namespace + "/" + pvName)
+			}
+
+			pvcReconcileError := r.reconcilePVC(broker, brokerClusterIndex, true, slaveIndex)
+			if pvcReconcileError != nil {
+				reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + pvcName)
+			}
+
+			slaveDep := r.statefulSetForSlaveBroker(broker, brokerClusterIndex, slaveIndex)
+			err = r.client.Get(context.TODO(), types.NamespacedName{Name: slaveDep.Name, Namespace: slaveDep.Namespace}, found)
+			if err != nil && errors.IsNotFound(err) {
+				reqLogger.Info("Creating a new Slave Broker StatefulSet.", "StatefulSet.Namespace", slaveDep.Namespace, "StatefulSet.Name", slaveDep.Name)
+				err = r.client.Create(context.TODO(), slaveDep)
+				if err != nil {
+					reqLogger.Error(err, "Failed to create new StatefulSet of broker-"+strconv.Itoa(brokerClusterIndex)+"-slave-"+strconv.Itoa(slaveIndex), "StatefulSet.Namespace", slaveDep.Namespace, "StatefulSet.Name", slaveDep.Name)
+				}
+			} else if err != nil {
+				reqLogger.Error(err, "Failed to get broker slave StatefulSet.")
+			}
 		}
 
 		// The following code will restart all brokers to update NAMESRV_ADDR env
@@ -219,8 +248,164 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 	return reconcile.Result{true, time.Duration(3) * time.Second}, nil
 }
 
+// newPV creates the PV used by the PVCs.
+func newPV(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) *corev1.PersistentVolume {
+	ls := labelsForBroker(cr.Name)
+
+	name := ""
+	if isSlave {
+		name = cr.Spec.PersistentVolumeClaim.Name + "-pv-" + "-cluster-" + strconv.Itoa(clusterIndex) + "-slave-" + strconv.Itoa(slaveIndex)
+	} else {
+		name = cr.Spec.PersistentVolumeClaim.Name + "-pv-" + "-cluster-" + strconv.Itoa(clusterIndex) + "-master"
+	}
+
+	return &corev1.PersistentVolume{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "PersistentVolume",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: cr.Namespace,
+			Labels:    ls,
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			Capacity: map[corev1.ResourceName]resource.Quantity{corev1.ResourceStorage: cr.Spec.PersistentVolumeClaim.Spec.Resources.Requests[corev1.ResourceStorage]},
+			AccessModes: cr.Spec.PersistentVolumeClaim.Spec.AccessModes,
+			PersistentVolumeReclaimPolicy: cr.Spec.PersistentVolumeReclaimPolicy,
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				NFS: &corev1.NFSVolumeSource{
+					Server: cr.Spec.NfcServer,
+					Path: cr.Spec.NfcPath,
+				},
+			},
+		},
+	}
+}
+
+
+func (r *ReconcileBroker) reconcilePV(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) error {
+	reqLogger := log.WithValues("Broker.Namespace", cr.Namespace, "Broker.Name", cr.Name)
+	// Check if this Persitent Volume Claim already exists
+	name := genPVName(cr, clusterIndex, isSlave, slaveIndex)
+	found := &corev1.PersistentVolume{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: cr.Namespace}, found)
+	if err != nil && errors.IsNotFound(err) {
+		reqLogger.Info("Creating a new Persistent Volume " + cr.Namespace + "/" + name)
+		pv := newPV(cr, clusterIndex, isSlave, slaveIndex)
+
+		// Set instance as the owner and controller
+		if err = controllerutil.SetControllerReference(cr, pv, r.scheme); err != nil {
+			reqLogger.Error(err, "Set PV " + pv.Name + " as the owner and controller failed")
+			return err
+		}
+
+		err = r.client.Create(context.TODO(), pv)
+		if err != nil {
+			reqLogger.Error(err, "Create PV " + pv.Name +  " failed")
+			return err
+		}
+		reqLogger.Info("Successfully created a new Persistent Volume: " + pv.Namespace + "/" + pv.Name)
+		// Persitent Volume created successfully
+
+		// TODO currently not support update PV
+
+		return nil
+	} else if err != nil {
+		reqLogger.Error(err, "Get PV failed")
+		return err
+	}
+
+	log.Info("Skip reconcile: Persistent Volume " + found.Namespace + "/" + found.Name + " because already exists")
+	return nil
+}
+
+func genName(cr *cachev1alpha1.Broker, middleName string, clusterIndex int, isSlave bool, slaveIndex int) string {
+	name := ""
+	if isSlave {
+		name = cr.Spec.PersistentVolumeClaim.Name + "-" + middleName + "-cluster-" + strconv.Itoa(clusterIndex) + "-slave-" + strconv.Itoa(slaveIndex)
+	} else {
+		name = cr.Spec.PersistentVolumeClaim.Name + "-" + middleName + "-cluster-" + strconv.Itoa(clusterIndex) + "-master"
+	}
+	return name
+}
+
+func genPVName(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) string {
+	return genName(cr, "pv", clusterIndex, isSlave, slaveIndex)
+}
+
+func genPVCName(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) string {
+	return genName(cr, "pvc", clusterIndex, isSlave, slaveIndex)
+}
+
+// newPVCs creates the PVCs used by the application.
+func newPVC(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) *corev1.PersistentVolumeClaim {
+	ls := labelsForBroker(cr.Name)
+	name := genPVCName(cr, clusterIndex, isSlave, slaveIndex)
+	return &corev1.PersistentVolumeClaim{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "PersistentVolumeClaim",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: cr.Namespace,
+			Labels:    ls,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: cr.Spec.PersistentVolumeClaim.Spec.AccessModes,
+			Resources: cr.Spec.PersistentVolumeClaim.Spec.Resources,
+		},
+	}
+}
+
+// reconcilePVC ensures the Persistent Volume Claim is created.
+func (r *ReconcileBroker) reconcilePVC(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) error {
+	reqLogger := log.WithValues("Broker.Namespace", cr.Namespace, "Broker.Name", cr.Name)
+
+	// Check if this Persitent Volume Claim already exists
+	name := genPVCName(cr, clusterIndex, isSlave, slaveIndex)
+	found := &corev1.PersistentVolumeClaim{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: cr.Namespace}, found)
+	if err != nil && errors.IsNotFound(err) {
+		reqLogger.Info("Creating a new Persistent Volume Claim " + cr.Namespace + "/" + cr.Spec.PersistentVolumeClaim.Name)
+		pvc := newPVC(cr, clusterIndex, isSlave, slaveIndex)
+
+		// Set instance as the owner and controller
+		if err = controllerutil.SetControllerReference(cr, pvc, r.scheme); err != nil {
+			reqLogger.Error(err, "Set PVC " + pvc.Name + " as the owner and controller failed")
+			return err
+		}
+
+		err = r.client.Create(context.TODO(), pvc)
+		if err != nil {
+			reqLogger.Error(err, "Create PVC " + pvc.Name +  " failed")
+			return err
+		}
+		reqLogger.Info("Successfully created a new Persistent Volume Claim: " + pvc.Namespace + "/" + pvc.Name)
+		// Persitent Volume Claim created successfully
+
+		// currently not support update PVC
+		//cr.Status.PersistentVolumeClaimName = pvc.Name
+		//err = r.client.Update(context.TODO(), cr)
+		//if err != nil {
+		//	reqLogger.Error(err, "Update PVC " + pvc.Name +  " failed")
+		//	return err
+		//}
+
+		return nil
+	} else if err != nil {
+		reqLogger.Error(err, "Get PVC failed")
+		return err
+	}
+
+	log.Info("Skip reconcile: Persistent Volume Claim " + found.Namespace + "/" + found.Name + " because already exists")
+	return nil
+}
+
+
 // statefulSetForBroker returns a master broker StatefulSet object
-func (r *ReconcileBroker) statefulSetForMasterBroker(m *cachev1alpha1.Broker, brokerClusterIndex int) *appsv1.StatefulSet {
+func (r *ReconcileBroker) statefulSetForMasterBroker(m *cachev1alpha1.Broker, brokerClusterIndex int, pvcName string) *appsv1.StatefulSet {
 	ls := labelsForBroker(m.Name)
 	var a int32 = 1
 	var c = &a
@@ -275,9 +460,18 @@ func (r *ReconcileBroker) statefulSetForMasterBroker(m *cachev1alpha1.Broker, br
 							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store",
 						}},
 					}},
+					Volumes: []corev1.Volume{
+						{
+							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store-volume",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: pvcName,
+								},
+							},
+						},
+					},
 				},
 			},
-			VolumeClaimTemplates: m.Spec.VolumeClaimTemplates,
 		},
 	}
 	// Set Broker instance as the owner and controller
@@ -343,9 +537,27 @@ func (r *ReconcileBroker) statefulSetForSlaveBroker(m *cachev1alpha1.Broker, bro
 							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-store",
 						}},
 					}},
+					Volumes: []corev1.Volume{
+						{
+							Name: "influxdb-data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: m.Spec.PersistentVolumeClaim.Name,
+								},
+							},
+						},
+						{
+							Name: "influxdb-data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: m.Spec.PersistentVolumeClaim.Name,
+								},
+							},
+						},
+					},
 				},
 			},
-			VolumeClaimTemplates: m.Spec.VolumeClaimTemplates,
+
 		},
 	}
 	// Set Broker instance as the owner and controller

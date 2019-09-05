@@ -30,14 +30,12 @@ spec:
   brokerImage: 2019liurui/rocketmq-broker:4.5.0-alpine
   # imagePullPolicy is the image pull policy
   imagePullPolicy: Always
-  # volumeClaimTemplates defines the storageClass
-  volumeClaimTemplates:
-    - metadata:
-        name: broker-storage
-        annotations:
-          volume.beta.kubernetes.io/storage-class: rocketmq-broker-storage
-      spec:
-        accessModes: [ "ReadWriteOnce" ]
-        resources:
-          requests:
-            storage: 8Gi
+  # volumeClaimTemplates defines the data storage
+  persistentVolumeClaim:
+    metadata:
+      name: "broker-storage"
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 8Gi

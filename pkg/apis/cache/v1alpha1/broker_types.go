@@ -39,14 +39,19 @@ type BrokerSpec struct {
 	BrokerImage string `json:"brokerImage"`
 	// ImagePullPolicy defines how the image is pulled.
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy"`
-	// VolumeClaimTemplates defines the StorageClass
-	VolumeClaimTemplates []corev1.PersistentVolumeClaim `json:"volumeClaimTemplates"`
+	// This field defines the data storage
+	PersistentVolumeClaim *corev1.PersistentVolumeClaim `json:"persistentVolumeClaim,omitempty"`
+	PersistentVolumeReclaimPolicy corev1.PersistentVolumeReclaimPolicy `json:"persistentVolumeReclaimPolicy,omitempty"`
+	NfcServer string `json:"nfcServer"`
+	NfcPath string `json:"nfcPath"`
 }
 
 // BrokerStatus defines the observed state of Broker
 // +k8s:openapi-gen=true
 type BrokerStatus struct {
 	Nodes []string `json:"nodes"`
+	// PersistentVolumeClaimName is the name of the PVC backing the pods in the cluster.
+	PersistentVolumeClaimName string `json:"persistentVolumeClaimName"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
