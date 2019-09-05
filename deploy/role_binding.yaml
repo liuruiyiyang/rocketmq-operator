@@ -20,7 +20,6 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: rocketmq-operator
-  apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: Role
   name: rocketmq-operator
