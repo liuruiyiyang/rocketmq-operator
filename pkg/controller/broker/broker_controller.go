@@ -120,8 +120,6 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 		return reconcile.Result{}, err
 	}
 
-
-
 	share.GroupNum = int(broker.Spec.Size)
 	slavePerGroup := broker.Spec.SlavePerGroup
 	reqLogger.Info("brokerGroupNum=" + strconv.Itoa(share.GroupNum) + ", slavePerGroup=" + strconv.Itoa(slavePerGroup))
@@ -129,22 +127,24 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 	for brokerClusterIndex := 0; brokerClusterIndex < share.GroupNum; brokerClusterIndex++ {
 		reqLogger.Info("Check Broker cluster " + strconv.Itoa(brokerClusterIndex+1) + "/" + strconv.Itoa(share.GroupNum))
 		// prepare pv and pvc for master broker
-		pvName := genPVName(broker, brokerClusterIndex, false, 0)
-		pvcName := genPVCName(broker, brokerClusterIndex, false, 0)
-		pvReconcileError := r.reconcilePV(broker, brokerClusterIndex, false, 0)
-		if pvReconcileError != nil {
-			reqLogger.Error(pvReconcileError, "Failed to reconcile PV " + broker.Namespace + "/" + pvName)
-		}
-		pvcReconcileError := r.reconcilePVC(broker, brokerClusterIndex, false, 0)
-		if pvcReconcileError != nil {
-			reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + pvcName)
-		}
+		masterPvName := genPVName(broker, brokerClusterIndex, false, 0)
+		masterPvcName := genPVCName(broker, brokerClusterIndex, false, 0)
 
 		// Check if the statefulSet already exists, if not create a new one
 		foundMasterBroker := &appsv1.StatefulSet{}
-		dep := r.statefulSetForMasterBroker(broker, brokerClusterIndex, pvcName)
+		dep := r.statefulSetForMasterBroker(broker, brokerClusterIndex, masterPvcName)
 		err = r.client.Get(context.TODO(), types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, foundMasterBroker)
 		if err != nil && errors.IsNotFound(err) {
+
+			pvReconcileError := r.reconcilePV(broker, brokerClusterIndex, false, 0)
+			if pvReconcileError != nil {
+				reqLogger.Error(pvReconcileError, "Failed to reconcile PV " + broker.Namespace + "/" + masterPvName)
+			}
+			pvcReconcileError := r.reconcilePVC(broker, brokerClusterIndex, false, 0)
+			if pvcReconcileError != nil {
+				reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + masterPvcName)
+			}
+
 			reqLogger.Info("Creating a new Master Broker StatefulSet.", "StatefulSet.Namespace", dep.Namespace, "StatefulSet.Name", dep.Name)
 			err = r.client.Create(context.TODO(), dep)
 
@@ -159,23 +159,23 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 			reqLogger.Info("Check Slave Broker of cluster-" + strconv.Itoa(brokerClusterIndex) + " " + strconv.Itoa(slaveIndex) + "/" + strconv.Itoa(slavePerGroup))
 
 			// prepare pv and pvc for slave broker
-			pvName := genPVName(broker, brokerClusterIndex, true, slaveIndex)
-			pvcName := genPVCName(broker, brokerClusterIndex, true, slaveIndex)
-
-			pvReconcileError := r.reconcilePV(broker, brokerClusterIndex, true, slaveIndex)
-			if pvReconcileError != nil {
-				reqLogger.Error(pvReconcileError, "Failed to reconcile PV " + broker.Namespace + "/" + pvName)
-			}
-
-			pvcReconcileError := r.reconcilePVC(broker, brokerClusterIndex, true, slaveIndex)
-			if pvcReconcileError != nil {
-				reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + pvcName)
-			}
+			slavePvName := genPVName(broker, brokerClusterIndex, true, slaveIndex)
+			slavePvcName := genPVCName(broker, brokerClusterIndex, true, slaveIndex)
 
 			foundSlaveBroker := &appsv1.StatefulSet{}
-			slaveDep := r.statefulSetForSlaveBroker(broker, brokerClusterIndex, slaveIndex, pvcName)
+			slaveDep := r.statefulSetForSlaveBroker(broker, brokerClusterIndex, slaveIndex, slavePvcName)
 			err = r.client.Get(context.TODO(), types.NamespacedName{Name: slaveDep.Name, Namespace: slaveDep.Namespace}, foundSlaveBroker)
 			if err != nil && errors.IsNotFound(err) {
+				pvReconcileError := r.reconcilePV(broker, brokerClusterIndex, true, slaveIndex)
+				if pvReconcileError != nil {
+					reqLogger.Error(pvReconcileError, "Failed to reconcile PV " + broker.Namespace + "/" + slavePvName)
+				}
+
+				pvcReconcileError := r.reconcilePVC(broker, brokerClusterIndex, true, slaveIndex)
+				if pvcReconcileError != nil {
+					reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + slavePvcName)
+				}
+
 				reqLogger.Info("Creating a new Slave Broker StatefulSet.", "StatefulSet.Namespace", slaveDep.Namespace, "StatefulSet.Name", slaveDep.Name)
 				err = r.client.Create(context.TODO(), slaveDep)
 				if err != nil {
@@ -403,6 +403,8 @@ func (r *ReconcileBroker) statefulSetForMasterBroker(m *cachev1alpha1.Broker, br
 	ls := labelsForBroker(m.Name)
 	var a int32 = 1
 	var c = &a
+	logName := genName(m, "log", brokerClusterIndex, false, 0)
+	storeName := genName(m, "store", brokerClusterIndex, false, 0)
 	dep := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master",
@@ -448,16 +450,23 @@ func (r *ReconcileBroker) statefulSetForMasterBroker(m *cachev1alpha1.Broker, br
 						}},
 						VolumeMounts: []corev1.VolumeMount{{
 							MountPath: cons.LogMountPath,
-							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-logs",
-							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-logs",
+							Name: logName,
+							SubPath: logName,
 						},{
 							MountPath: cons.StoreMountPath,
-							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store",
-							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store",
+							Name: storeName,
+							SubPath: storeName,
 						}},
 					}},
 					Volumes: []corev1.Volume{{
-						Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-master-store-volume",
+						Name: logName,
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: pvcName,
+							},
+						},
+					},{
+						Name: storeName,
 						VolumeSource: corev1.VolumeSource{
 							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 								ClaimName: pvcName,
@@ -480,6 +489,8 @@ func (r *ReconcileBroker) statefulSetForSlaveBroker(m *cachev1alpha1.Broker, bro
 	ls := labelsForBroker(m.Name)
 	var a int32 = 1
 	var c = &a
+	logName := genName(m, "log", brokerClusterIndex, true, slaveIndex)
+	storeName := genName(m, "store", brokerClusterIndex, true, slaveIndex)
 	dep := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex),
@@ -525,16 +536,23 @@ func (r *ReconcileBroker) statefulSetForSlaveBroker(m *cachev1alpha1.Broker, bro
 						}},
 						VolumeMounts: []corev1.VolumeMount{{
 							MountPath: cons.LogMountPath,
-							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-logs",
-							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-logs",
+							Name: logName,
+							SubPath: logName,
 						},{
 							MountPath: cons.StoreMountPath,
-							Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-store",
-							SubPath: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-store",
+							Name: storeName,
+							SubPath: storeName,
 						}},
 					}},
 					Volumes: []corev1.Volume{{
-						Name: m.Name + "-" + strconv.Itoa(brokerClusterIndex) + "-slave-" + strconv.Itoa(slaveIndex) + "-store-volume",
+						Name: storeName,
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: pvcName,
+							},
+						},
+					},{
+						Name: logName,
 						VolumeSource: corev1.VolumeSource{
 							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 								ClaimName: pvcName,
