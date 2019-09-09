@@ -120,8 +120,7 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 		return reconcile.Result{}, err
 	}
 
-	// Check if the statefulSet already exists, if not create a new one
-	found := &appsv1.StatefulSet{}
+
 
 	share.GroupNum = int(broker.Spec.Size)
 	slavePerGroup := broker.Spec.SlavePerGroup
@@ -141,8 +140,10 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 			reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + pvcName)
 		}
 
+		// Check if the statefulSet already exists, if not create a new one
+		foundMasterBroker := &appsv1.StatefulSet{}
 		dep := r.statefulSetForMasterBroker(broker, brokerClusterIndex, pvcName)
-		err = r.client.Get(context.TODO(), types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, found)
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace}, foundMasterBroker)
 		if err != nil && errors.IsNotFound(err) {
 			reqLogger.Info("Creating a new Master Broker StatefulSet.", "StatefulSet.Namespace", dep.Namespace, "StatefulSet.Name", dep.Name)
 			err = r.client.Create(context.TODO(), dep)
@@ -171,8 +172,9 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 				reqLogger.Error(pvcReconcileError, "Failed to reconcile PVC " + broker.Namespace + "/" + pvcName)
 			}
 
+			foundSlaveBroker := &appsv1.StatefulSet{}
 			slaveDep := r.statefulSetForSlaveBroker(broker, brokerClusterIndex, slaveIndex, pvcName)
-			err = r.client.Get(context.TODO(), types.NamespacedName{Name: slaveDep.Name, Namespace: slaveDep.Namespace}, found)
+			err = r.client.Get(context.TODO(), types.NamespacedName{Name: slaveDep.Name, Namespace: slaveDep.Namespace}, foundSlaveBroker)
 			if err != nil && errors.IsNotFound(err) {
 				reqLogger.Info("Creating a new Slave Broker StatefulSet.", "StatefulSet.Namespace", slaveDep.Namespace, "StatefulSet.Name", slaveDep.Name)
 				err = r.client.Create(context.TODO(), slaveDep)
@@ -248,17 +250,28 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 	return reconcile.Result{true, time.Duration(3) * time.Second}, nil
 }
 
+func genName(cr *cachev1alpha1.Broker, middleName string, clusterIndex int, isSlave bool, slaveIndex int) string {
+	name := ""
+	if isSlave {
+		name = cr.Spec.PersistentVolumeClaim.Name + "-" + middleName + "-cluster-" + strconv.Itoa(clusterIndex) + "-slave-" + strconv.Itoa(slaveIndex)
+	} else {
+		name = cr.Spec.PersistentVolumeClaim.Name + "-" + middleName + "-cluster-" + strconv.Itoa(clusterIndex) + "-master"
+	}
+	return name
+}
+
+func genPVName(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) string {
+	return genName(cr, "pv", clusterIndex, isSlave, slaveIndex)
+}
+
+func genPVCName(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) string {
+	return genName(cr, "pvc", clusterIndex, isSlave, slaveIndex)
+}
+
 // newPV creates the PV used by the PVCs.
 func newPV(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) *corev1.PersistentVolume {
 	ls := labelsForBroker(cr.Name)
-
-	name := ""
-	if isSlave {
-		name = cr.Spec.PersistentVolumeClaim.Name + "-pv-" + "-cluster-" + strconv.Itoa(clusterIndex) + "-slave-" + strconv.Itoa(slaveIndex)
-	} else {
-		name = cr.Spec.PersistentVolumeClaim.Name + "-pv-" + "-cluster-" + strconv.Itoa(clusterIndex) + "-master"
-	}
-
+	name := genPVName(cr, clusterIndex, isSlave, slaveIndex)
 	return &corev1.PersistentVolume{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -283,13 +296,33 @@ func newPV(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex 
 	}
 }
 
+// newPVCs creates the PVCs used by the application.
+func newPVC(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) *corev1.PersistentVolumeClaim {
+	ls := labelsForBroker(cr.Name)
+	name := genPVCName(cr, clusterIndex, isSlave, slaveIndex)
+	return &corev1.PersistentVolumeClaim{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "PersistentVolumeClaim",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: cr.Namespace,
+			Labels:    ls,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: cr.Spec.PersistentVolumeClaim.Spec.AccessModes,
+			Resources: cr.Spec.PersistentVolumeClaim.Spec.Resources,
+		},
+	}
+}
 
 func (r *ReconcileBroker) reconcilePV(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) error {
 	reqLogger := log.WithValues("Broker.Namespace", cr.Namespace, "Broker.Name", cr.Name)
-	// Check if this Persitent Volume Claim already exists
+	// Check if this Persistent Volume already exists
 	name := genPVName(cr, clusterIndex, isSlave, slaveIndex)
-	found := &corev1.PersistentVolume{}
-	err := r.client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: cr.Namespace}, found)
+	foundPV := &corev1.PersistentVolume{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: cr.Namespace}, foundPV)
 	if err != nil && errors.IsNotFound(err) {
 		reqLogger.Info("Creating a new Persistent Volume " + cr.Namespace + "/" + name)
 		pv := newPV(cr, clusterIndex, isSlave, slaveIndex)
@@ -316,47 +349,8 @@ func (r *ReconcileBroker) reconcilePV(cr *cachev1alpha1.Broker, clusterIndex int
 		return err
 	}
 
-	log.Info("Skip reconcile: Persistent Volume " + found.Namespace + "/" + found.Name + " because already exists")
+	log.Info("Skip reconcile: Persistent Volume " + foundPV.Namespace + "/" + foundPV.Name + " because already exists")
 	return nil
-}
-
-func genName(cr *cachev1alpha1.Broker, middleName string, clusterIndex int, isSlave bool, slaveIndex int) string {
-	name := ""
-	if isSlave {
-		name = cr.Spec.PersistentVolumeClaim.Name + "-" + middleName + "-cluster-" + strconv.Itoa(clusterIndex) + "-slave-" + strconv.Itoa(slaveIndex)
-	} else {
-		name = cr.Spec.PersistentVolumeClaim.Name + "-" + middleName + "-cluster-" + strconv.Itoa(clusterIndex) + "-master"
-	}
-	return name
-}
-
-func genPVName(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) string {
-	return genName(cr, "pv", clusterIndex, isSlave, slaveIndex)
-}
-
-func genPVCName(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) string {
-	return genName(cr, "pvc", clusterIndex, isSlave, slaveIndex)
-}
-
-// newPVCs creates the PVCs used by the application.
-func newPVC(cr *cachev1alpha1.Broker, clusterIndex int, isSlave bool, slaveIndex int) *corev1.PersistentVolumeClaim {
-	ls := labelsForBroker(cr.Name)
-	name := genPVCName(cr, clusterIndex, isSlave, slaveIndex)
-	return &corev1.PersistentVolumeClaim{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "PersistentVolumeClaim",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: cr.Namespace,
-			Labels:    ls,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: cr.Spec.PersistentVolumeClaim.Spec.AccessModes,
-			Resources: cr.Spec.PersistentVolumeClaim.Spec.Resources,
-		},
-	}
 }
 
 // reconcilePVC ensures the Persistent Volume Claim is created.
@@ -365,8 +359,8 @@ func (r *ReconcileBroker) reconcilePVC(cr *cachev1alpha1.Broker, clusterIndex in
 
 	// Check if this Persitent Volume Claim already exists
 	name := genPVCName(cr, clusterIndex, isSlave, slaveIndex)
-	found := &corev1.PersistentVolumeClaim{}
-	err := r.client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: cr.Namespace}, found)
+	foundPVC := &corev1.PersistentVolumeClaim{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: cr.Namespace}, foundPVC)
 	if err != nil && errors.IsNotFound(err) {
 		reqLogger.Info("Creating a new Persistent Volume Claim " + cr.Namespace + "/" + cr.Spec.PersistentVolumeClaim.Name)
 		pvc := newPVC(cr, clusterIndex, isSlave, slaveIndex)
@@ -399,7 +393,7 @@ func (r *ReconcileBroker) reconcilePVC(cr *cachev1alpha1.Broker, clusterIndex in
 		return err
 	}
 
-	log.Info("Skip reconcile: Persistent Volume Claim " + found.Namespace + "/" + found.Name + " because already exists")
+	log.Info("Skip reconcile: Persistent Volume Claim " + foundPVC.Namespace + "/" + foundPVC.Name + " because already exists")
 	return nil
 }
 

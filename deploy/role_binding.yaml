@@ -20,7 +20,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: rocketmq-operator
-  namespace: "*"
+  namespace: kube-system
 roleRef:
   kind: ClusterRole
   name: cluster-admin
