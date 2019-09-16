@@ -188,8 +188,9 @@ func (r *ReconcileNameService) updateNameServiceStatus(instance *rocketmqv1alpha
 		share.NameServersStr = nameServerListStr[:len(nameServerListStr)-1]
 		reqLogger.Info("share.NameServersStr:" + share.NameServersStr)
 
-		if len(oldNameServerListStr) < 2 {
+		if len(oldNameServerListStr) < 8 {
 			oldNameServerListStr = share.NameServersStr
+			share.IsNameServersStrUpdated = false
 		} else {
 			oldNameServerListStr = oldNameServerListStr[:len(oldNameServerListStr)-1]
 			share.IsNameServersStrUpdated = true

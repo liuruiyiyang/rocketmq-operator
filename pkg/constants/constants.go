@@ -45,5 +45,7 @@ const StorageModeNFS  = "NFS"
 const StorageModeEmptyDir  = "EmptyDir"
 const StorageModeHostPath  = "HostPath"
 
+const CheckRunningPodIntervalInSecond  = 1
+
 
 

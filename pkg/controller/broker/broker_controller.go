@@ -19,6 +19,7 @@ package broker
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -172,11 +174,18 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 					reqLogger.Error(err, "Failed to get broker master StatefulSet of " + brokerName)
 				} else {
 					found.Spec.Template.Spec.Containers[0].Env[0].Value = share.NameServersStr
-					err = r.client.Update(context.TODO(), found)
-					if err != nil {
-						reqLogger.Error(err, "Failed to update NAMESRV_ADDR of master broker " + brokerName, "StatefulSet.Namespace", found.Namespace, "StatefulSet.Name", found.Name)
-					} else {
-						reqLogger.Info("Successfully updated NAMESRV_ADDR of master broker " + brokerName, "StatefulSet.Namespace", found.Namespace, "StatefulSet.Name", found.Name)
+					for {
+						if r.isRunningPodRatioSatisfy(broker, request) {
+							err = r.client.Update(context.TODO(), found)
+							if err != nil {
+								reqLogger.Error(err, "Failed to update NAMESRV_ADDR of master broker "+brokerName, "StatefulSet.Namespace", found.Namespace, "StatefulSet.Name", found.Name)
+							} else {
+								reqLogger.Info("Successfully updated NAMESRV_ADDR of master broker "+brokerName, "StatefulSet.Namespace", found.Namespace, "StatefulSet.Name", found.Name)
+							}
+							time.Sleep(time.Duration(cons.CheckRunningPodIntervalInSecond) * time.Second)
+							break
+						}
+						time.Sleep(time.Duration(cons.CheckRunningPodIntervalInSecond) * time.Second)
 					}
 				}
 				// update replicas brokers
@@ -189,11 +198,18 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 						reqLogger.Error(err, "Failed to get broker replica StatefulSet of " + brokerName)
 					} else {
 						replicaFound.Spec.Template.Spec.Containers[0].Env[0].Value = share.NameServersStr
-						err = r.client.Update(context.TODO(), replicaFound)
-						if err != nil {
-							reqLogger.Error(err, "Failed to update NAMESRV_ADDR of "+strconv.Itoa(brokerGroupIndex)+"-replica-"+strconv.Itoa(replicaIndex), "StatefulSet.Namespace", replicaFound.Namespace, "StatefulSet.Name", replicaFound.Name)
-						} else {
-							reqLogger.Info("Successfully updated NAMESRV_ADDR of "+strconv.Itoa(brokerGroupIndex)+"-replica-"+strconv.Itoa(replicaIndex), "StatefulSet.Namespace", replicaFound.Namespace, "StatefulSet.Name", replicaFound.Name)
+						for {
+							if r.isRunningPodRatioSatisfy(broker, request) {
+								err = r.client.Update(context.TODO(), replicaFound)
+								if err != nil {
+									reqLogger.Error(err, "Failed to update NAMESRV_ADDR of "+strconv.Itoa(brokerGroupIndex)+"-replica-"+strconv.Itoa(replicaIndex), "StatefulSet.Namespace", replicaFound.Namespace, "StatefulSet.Name", replicaFound.Name)
+								} else {
+									reqLogger.Info("Successfully updated NAMESRV_ADDR of "+strconv.Itoa(brokerGroupIndex)+"-replica-"+strconv.Itoa(replicaIndex), "StatefulSet.Namespace", replicaFound.Namespace, "StatefulSet.Name", replicaFound.Name)
+								}
+								time.Sleep(time.Duration(cons.CheckRunningPodIntervalInSecond) * time.Second)
+								break
+							}
+							time.Sleep(time.Duration(cons.CheckRunningPodIntervalInSecond) * time.Second)
 						}
 					}
 				}
@@ -201,6 +217,7 @@ func (r *ReconcileBroker) Reconcile(request reconcile.Request) (reconcile.Result
 		}
 	}
 	share.IsNameServersStrUpdated = false
+
 
 	// Ensure the statefulSet size is the same as the spec
 	//size := broker.Spec.Size
@@ -309,7 +326,7 @@ func (r *ReconcileBroker) statefulSetForMasterBroker(broker *rocketmqv1alpha1.Br
 							SubPath:   cons.StoreSubPathName + getPathSuffix(broker, brokerGroupIndex, 0),
 						}},
 					}},
-					Volumes: getVolumes(broker, false, brokerGroupIndex, 0),
+					Volumes: getVolumes(broker),
 				},
 			},
 			VolumeClaimTemplates: getVolumeClaimTemplates(broker),
@@ -382,7 +399,7 @@ func (r *ReconcileBroker) statefulSetForReplicaBroker(broker *rocketmqv1alpha1.B
 							SubPath:   cons.StoreSubPathName + getPathSuffix(broker, brokerGroupIndex, replicaIndex),
 						}},
 					}},
-					Volumes: getVolumes(broker, true, brokerGroupIndex, replicaIndex),
+					Volumes: getVolumes(broker),
 				},
 			},
 			VolumeClaimTemplates: getVolumeClaimTemplates(broker),
@@ -406,7 +423,7 @@ func getVolumeClaimTemplates(broker *rocketmqv1alpha1.Broker) []corev1.Persisten
 	}
 }
 
-func getVolumes(broker *rocketmqv1alpha1.Broker, isReplica bool, brokerGroupIndex int, replicaIndex int) []corev1.Volume {
+func getVolumes(broker *rocketmqv1alpha1.Broker) []corev1.Volume {
 	switch broker.Spec.StorageMode {
 	case cons.StorageModeNFS:
 		return nil
@@ -454,4 +471,51 @@ func getPodNames(pods []corev1.Pod) []string {
 		podNames = append(podNames, pod.Name)
 	}
 	return podNames
+}
+
+func getRunningPodNameAndRatio(pods []corev1.Pod) ([]string, float64) {
+	var runningPodNames []string
+	totalPodNum := 0
+	runningPodNum := 0
+	for i, pod := range pods {
+		totalPodNum ++
+		podPhase := pod.Status.Phase
+		if reflect.DeepEqual(podPhase, corev1.PodRunning) {
+			runningPodNum ++
+			runningPodNames = append(runningPodNames, pod.Name)
+		}
+		log.Info("pod.Status.Phase " + strconv.Itoa(i) + " = " + string(podPhase))
+	}
+	log.Info("runningPodNum = " + strconv.Itoa(runningPodNum))
+	var ratio float64 = 0
+	if totalPodNum != 0 {
+		ratio = float64(runningPodNum) / float64(totalPodNum)
+	}
+
+	return runningPodNames, ratio
+}
+
+func (r *ReconcileBroker) isRunningPodRatioSatisfy(broker *rocketmqv1alpha1.Broker, request reconcile.Request) bool {
+	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	minRunningRatio := 0.8
+	podList := &corev1.PodList{}
+	labelSelector := labels.SelectorFromSet(labelsForBroker(broker.Name))
+	listOps := &client.ListOptions{
+		Namespace:     broker.Namespace,
+		LabelSelector: labelSelector,
+	}
+	err := r.client.List(context.TODO(), listOps, podList)
+	if err != nil {
+		reqLogger.Error(err, "Failed to list pods.", "Broker.Namespace", broker.Namespace, "Broker.Name", broker.Name)
+		return false
+	}
+	names, runningBrokerPodRatio := getRunningPodNameAndRatio(podList.Items)
+	reqLogger.Info("Running pod ratio = " + strconv.FormatFloat(runningBrokerPodRatio, 'f', 2, 64))
+	for i, value := range names {
+		reqLogger.Info("Running pod name " + strconv.Itoa(i) + " is " + value)
+	}
+	if runningBrokerPodRatio < minRunningRatio {
+		return false
+	}
+	return true
 }
